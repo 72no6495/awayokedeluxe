@@ -53,15 +53,24 @@
     let shopOptions = [];
     let goldenBubbleScoreBonus = 0;
     let autoShootInterval = null;
-    let lastShopScore = -2000; // 前回のショップ出現時のスコア（初期値は負にして初回出現を保証）
+    let lastShopScore = -2000;
+    let shieldMessageTimer = 0; // シールド消費メッセージの表示時間
     let shopEffects = {
-      smallerBubbles: false,       // 泡を小さくする
-      largerGoldenBubbles: false,  // 金の泡を大きくする
-      slowerBubbles: false,        // 泡の速度を遅くする
+      smallerBubbles: false,
+      largerGoldenBubbles: false,
+      slowerBubbles: false,
       bulletSpeedUp: false,
       speedUp: false,
       goldenBubbleChanceUp: false,
-      scorePerSecond: false
+      scorePerSecond: false,
+      fasterShooting: false,
+      smallerHitbox: false,
+      piercingBullets: false,
+      shield: false,
+      straightBubbles: false,
+      extraSpeedUp: false,
+      extraScorePerSecond: false,
+      extraGoldenBubbleChanceUp: false
     };
 
     canvas.addEventListener('touchstart', (e) => {
@@ -124,7 +133,9 @@
     }
 
     function moveCharacter() {
-      const speed = shopEffects.speedUp ? 7 : 5;
+      let speed = 5;
+      if (shopEffects.speedUp) speed = 7;
+      if (shopEffects.extraSpeedUp) speed = 9;
       let dx = character.targetX - character.x;
       let dy = character.targetY - character.y;
       let distance = Math.sqrt(dx * dx + dy * dy);
@@ -155,13 +166,17 @@
       if (scoreTimer) clearInterval(scoreTimer);
       scoreTimer = setInterval(() => {
         if (gameState === 'playing' && !gameOverState) {
-          score += shopEffects.scorePerSecond ? 20 : 10;
+          if (shopEffects.extraScorePerSecond) score += 30;
+          else if (shopEffects.scorePerSecond) score += 20;
+          else score += 10;
         }
       }, 1000);
     }
 
     function spawnBubble() {
-      const goldenBubbleChance = shopEffects.goldenBubbleChanceUp ? 0.2 : 0.125;
+      let goldenBubbleChance = 0.125;
+      if (shopEffects.goldenBubbleChanceUp) goldenBubbleChance = 0.2;
+      if (shopEffects.extraGoldenBubbleChanceUp) goldenBubbleChance = 0.3;
       const baseRadius = 15;
       const bubbleRadius = shopEffects.smallerBubbles ? Math.max(5, baseRadius - 5) : baseRadius;
       const goldenBubbleRadius = shopEffects.largerGoldenBubbles ? baseRadius + 5 : baseRadius;
@@ -191,11 +206,10 @@
     function updateBubbles() {
       for (let i = bubbles.length - 1; i >= 0; i--) {
         let b = bubbles[i];
-        b.x += b.speedX + Math.sin(Date.now() * 0.001) * 1;
+        if (shopEffects.straightBubbles) b.x += b.speedX;
+        else b.x += b.speedX + Math.sin(Date.now() * 0.001) * 1;
         b.y += b.speedY;
-        if (b.y > canvas.height + b.radius) {
-          bubbles.splice(i, 1);
-        }
+        if (b.y > canvas.height + b.radius) bubbles.splice(i, 1);
       }
     }
 
@@ -211,7 +225,13 @@
             bubbles.splice(index, 1);
             fireBullets();
           } else {
-            gameOver();
+            if (shopEffects.shield) {
+              shopEffects.shield = false;
+              bubbles = []; // すべての泡を削除
+              shieldMessageTimer = 120; // メッセージを約2秒表示（60fpsとして）
+            } else {
+              gameOver();
+            }
           }
         }
       });
@@ -256,6 +276,7 @@
 
     function fireBullets() {
       let shots = 0;
+      const intervalTime = shopEffects.fasterShooting ? 150 : 300;
       const interval = setInterval(() => {
         if (shots < 8) {
           shootBullet();
@@ -263,7 +284,7 @@
         } else {
           clearInterval(interval);
         }
-      }, 300);
+      }, intervalTime);
     }
 
     function updateBullets() {
@@ -274,6 +295,7 @@
         if (bullet.x < 0 || bullet.x > canvas.width || bullet.y < 0 || bullet.y > canvas.height) {
           bullets.splice(i, 1);
         } else {
+          let hit = false;
           bubbles.forEach((b, bIndex) => {
             if (b.isGoldenBubble) return;
             let dx = bullet.x - b.x;
@@ -281,10 +303,10 @@
             let distance = Math.sqrt(dx * dx + dy * dy);
             if (distance < bullet.radius + b.radius) {
               bubbles.splice(bIndex, 1);
-              bullets.splice(i, 1);
-              return;
+              if (!shopEffects.piercingBullets) hit = true;
             }
           });
+          if (hit) bullets.splice(i, 1);
         }
       }
     }
@@ -371,6 +393,16 @@
         ctx.fillText(`ゲームオーバー`, canvas.width / 2 - 100, canvas.height / 2 - 50);
         ctx.fillText(`スコア: ${score}`, canvas.width / 2 - 70, canvas.height / 2);
       }
+
+      // シールド消費メッセージの表示
+      if (shieldMessageTimer > 0) {
+        ctx.fillStyle = 'rgba(0, 0, 0, 0.7)';
+        ctx.fillRect(canvas.width / 2 - 100, canvas.height / 2 - 30, 200, 60);
+        ctx.fillStyle = 'white';
+        ctx.font = '20px Arial';
+        ctx.fillText('シールドが消費されました', canvas.width / 2 - 90, canvas.height / 2 + 5);
+        shieldMessageTimer--;
+      }
     }
 
     function drawShop() {
@@ -403,6 +435,16 @@
         shopOptions = ['キャラの移動速度アップ', '青い泡の出現率を下げる'];
       } else if (shopCount === 5) {
         shopOptions = ['金の泡の出現率アップ', 'スコアを毎秒20増やす'];
+      } else if (shopCount === 6) {
+        shopOptions = ['弾の連射速度を上げる', 'キャラの当たり判定を小さくする'];
+      } else if (shopCount === 7) {
+        shopOptions = ['青い泡の出現率をさらに下げる', '金の泡のスコアをさらに200増やす'];
+      } else if (shopCount === 8) {
+        shopOptions = ['弾の貫通力を付与', 'キャラにシールドを付与'];
+      } else if (shopCount === 9) {
+        shopOptions = ['泡の動きを予測しやすくする', 'キャラの移動速度をさらに上げる'];
+      } else if (shopCount === 10) {
+        shopOptions = ['スコアを毎秒30増やす', '金の泡の出現率をさらに上げる'];
       }
     }
 
@@ -410,49 +452,49 @@
       if (shopCount === 1) {
         if (option === 1) {
           shopEffects.smallerBubbles = true;
-          bubbles.forEach(b => {
-            if (!b.isGoldenBubble) {
-              b.radius = Math.max(5, b.radius - 5);
-            }
-          });
+          bubbles.forEach(b => { if (!b.isGoldenBubble) b.radius = Math.max(5, b.radius - 5); });
         } else if (option === 2) {
           shopEffects.largerGoldenBubbles = true;
-          bubbles.forEach(b => {
-            if (b.isGoldenBubble) {
-              b.radius += 5;
-            }
-          });
+          bubbles.forEach(b => { if (b.isGoldenBubble) b.radius += 5; });
         }
       } else if (shopCount === 2) {
         if (option === 1) {
-          if (!autoShootInterval) {
-            autoShootInterval = setInterval(shootBullet, 1000);
-          }
-        } else if (option === 2) {
-          goldenBubbleScoreBonus += 200;
-        }
+          if (!autoShootInterval) autoShootInterval = setInterval(shootBullet, 1000);
+        } else if (option === 2) goldenBubbleScoreBonus += 200;
       } else if (shopCount === 3) {
         if (option === 1) {
           shopEffects.slowerBubbles = true;
-          bubbles.forEach(b => {
-            b.speedY = Math.max(0.1, b.speedY * 0.8);
-          });
-        } else if (option === 2) {
-          shopEffects.bulletSpeedUp = true;
-        }
+          bubbles.forEach(b => { b.speedY = Math.max(0.1, b.speedY * 0.8); });
+        } else if (option === 2) shopEffects.bulletSpeedUp = true;
       } else if (shopCount === 4) {
-        if (option === 1) {
-          shopEffects.speedUp = true;
-        } else if (option === 2) {
-          bubbleSpawnRate = Math.min(150, bubbleSpawnRate + 20);
-        }
+        if (option === 1) shopEffects.speedUp = true;
+        else if (option === 2) bubbleSpawnRate = Math.min(150, bubbleSpawnRate + 20);
       } else if (shopCount === 5) {
+        if (option === 1) shopEffects.goldenBubbleChanceUp = true;
+        else if (option === 2) { shopEffects.scorePerSecond = true; startScoreTimer(); }
+      } else if (shopCount === 6) {
         if (option === 1) {
-          shopEffects.goldenBubbleChanceUp = true;
+          shopEffects.fasterShooting = true;
+          if (autoShootInterval) {
+            clearInterval(autoShootInterval);
+            autoShootInterval = setInterval(shootBullet, 500);
+          }
         } else if (option === 2) {
-          shopEffects.scorePerSecond = true;
-          startScoreTimer();
+          shopEffects.smallerHitbox = true;
+          character.radius = Math.max(10, character.radius - 5);
         }
+      } else if (shopCount === 7) {
+        if (option === 1) bubbleSpawnRate = Math.min(150, bubbleSpawnRate + 20);
+        else if (option === 2) goldenBubbleScoreBonus += 200;
+      } else if (shopCount === 8) {
+        if (option === 1) shopEffects.piercingBullets = true;
+        else if (option === 2) shopEffects.shield = true;
+      } else if (shopCount === 9) {
+        if (option === 1) shopEffects.straightBubbles = true;
+        else if (option === 2) shopEffects.extraSpeedUp = true;
+      } else if (shopCount === 10) {
+        if (option === 1) { shopEffects.extraScorePerSecond = true; startScoreTimer(); }
+        else if (option === 2) shopEffects.extraGoldenBubbleChanceUp = true;
       }
     }
 
@@ -461,7 +503,7 @@
       frameCount++;
 
       if (gameState === 'playing' && !gameOverState) {
-        if (score >= lastShopScore + 2000 && !isShopOpen && shopCount < 5) {
+        if (score >= lastShopScore + 2000 && !isShopOpen && shopCount < 10) {
           isShopOpen = true;
           shopCount++;
           lastShopScore = score;
@@ -469,9 +511,7 @@
         }
 
         if (!isShopOpen) {
-          if (frameCount % bubbleSpawnRate === 0) {
-            spawnBubble();
-          }
+          if (frameCount % bubbleSpawnRate === 0) spawnBubble();
           moveCharacter();
           updateBubbles();
           updateBullets();
